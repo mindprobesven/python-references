@@ -1,0 +1,34 @@
+# Package and Module Names
+Modules should have short, all-lowercase names. Underscores can be used in the module name if it improves readability.
+processlist
+process_list
+
+# Class Names
+Class names should normally use the CapWords convention.
+MyClass
+
+# Exception Names
+CapWords convention. However, you should use the suffix "Error" on your exception names (if the exception actually is an error).
+MyError
+FileProcessError
+
+# Function Names
+Function names should be lowercase, with words separated by underscores as necessary to improve readability.
+my_function
+
+# Variable Names
+Variable names should be lowercase, with words separated by underscores as necessary to improve readability.
+my_variable
+
+# Method Names and Instance Variables
+Lowercase, with words separated by underscores
+Use one leading underscore only for non-public methods and instance variables.
+To avoid name clashes with subclasses, use two leading underscores to invoke Python's name mangling rules.
+my_method()
+my_instance_variable
+_some_private_method
+
+# Constants
+All capital letters with underscores separating words.
+MAX_OVERFLOW
+TOTAL
