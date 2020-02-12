@@ -1,3 +1,7 @@
+# sudo apt-get install gstreamer1.0-plugins-good gstreamer1.0-plugins-ugly gstreamer1.0-tools python3-gst-1.0 python3-gi gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0
+# pip install vext.gi
+# pip install ruamel.yaml ruamel.yaml.clib
+
 import asyncio
 import threading
 import time
@@ -5,7 +9,7 @@ from playsound import playsound
 
 def play(kill_main_event):
     print("Before playing sound")
-    playsound('/Users/svenkohn/Desktop/Python/Python%20Tests/asyncio/clearly.mp3')
+    playsound('/home/ubuntu/Desktop/clearly.mp3')
     print("After playing sound")
     kill_main_event.set()
 
