@@ -4,19 +4,17 @@ import platform
 import sys
 import time
 import signal
-from threading import Thread, Event
-from PyQt5.QtWidgets import QApplication, QWidget, QLabel
+from subprocess import Popen
 from PyQt5.QtCore import QTimer, QProcess, QCoreApplication, QThread, pyqtSignal
-from PyQt5 import QtCore
 from PyQt5 import QtBluetooth as QtBt
 
 class Error(Exception):
     pass
 
-class BluetoothError(Error):
+class BluetoothSpeakerError(Error):
     pass
 
-class Bluethooth():
+class BluethoothSpeaker():
     def __init__(self):
         self.local_device = QtBt.QBluetoothLocalDevice()
         self.local_device.deviceConnected.connect(self.notify_connect)
@@ -28,25 +26,22 @@ class Bluethooth():
         self.agent.error.connect(self.notify_error)
         self.agent.setLowEnergyDiscoveryTimeout(60000)
 
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.scan)
+        self.scan_loop_timer = QTimer()
+        self.scan_loop_timer.timeout.connect(self.scan_loop)
 
-        self.bluetooth_cb = object()
+        self.bluetooth_speaker_cb = object()
 
     def notify_discovered(self, *args, **kwargs):
         print('notify discovered', args, kwargs)
 
     def notify_connect(self, *args, **kwargs):
         print('notify connect', args, kwargs)
-        self.bluetooth_cb("connected")
+        self.bluetooth_speaker_cb("connected")
 
     def notify_disconnect(self, *args, **kwargs):
         print('notify disconnect', args, kwargs)
-        self.clear_device_cache()
-
-        print("Restart Bluetooth device scan")
-        self.timer.start(1000)
-        self.agent.start()
+        self.bluetooth_speaker_cb("disconnected")
+        self.start_scan_loop()
 
     def notify_finished(self, *args, **kwargs):
         print('notify finished', args, kwargs)
@@ -54,7 +49,7 @@ class Bluethooth():
     def notify_error(self, *args, **kwargs):
         print('notify error', args, kwargs)
 
-    def connect_device(self, address):
+    def connect_speaker_device(self, address):
         if platform.system() == "Darwin":
             print("Pairing...")
             process = QProcess()
@@ -76,7 +71,6 @@ class Bluethooth():
 
             while True:
                 process.waitForReadyRead(1500)
-                # print(bytes(process.readAll()).decode('utf-8'))
                 data = bytes(process.readAll()).decode('utf-8').split(" ")
                 print(data)
 
@@ -84,28 +78,22 @@ class Bluethooth():
                     print("Connection successful")
                     break
                 elif any("Failed" in x for x in data):
-                    print("Connection failed! Retrying...")
-                    process.writeData(bytes("disconnect B1:20:B5:86:AA:B9\n", 'utf-8'))
-                    process.waitForBytesWritten()
-                    process.writeData(bytes("remove B1:20:B5:86:AA:B9\n", 'utf-8'))
-                    process.waitForBytesWritten()
-                    process.writeData(bytes("connect B1:20:B5:86:AA:B9\n", 'utf-8'))
-                    process.waitForBytesWritten()
+                    print(f"ERROR: bluez.failed")
+                    self.bluetooth_speaker_cb(BluetoothSpeakerError("Bluetooth speaker daemon failed to start"))
 
                 time.sleep(1.0)
 
             process.writeData(bytes("exit\n", 'utf-8'))
             process.waitForBytesWritten()
             process.waitForReadyRead(1500)
-            # print(bytes(process.readAll()).decode('utf-8'))
             process.closeWriteChannel()
             process.waitForFinished()
             process.close()
-            print("Connected")
+            print("Waiting for notify_connect to fire")
         else:
             print("Unsupported platform")
 
-    def scan(self):
+    def scan_loop(self):
         print(self.agent.isActive(), self.agent.discoveredDevices())
         devices = self.agent.discoveredDevices()
         if self.agent.isActive() and len(self.local_device.connectedDevices()) < 1:
@@ -115,14 +103,13 @@ class Bluethooth():
                     print("Found")
                     print(device.address().toString())
                     self.agent.stop()
-                    self.timer.stop()
-                    self.connect_device(device.address().toString())
+                    self.scan_loop_timer.stop()
+                    self.connect_speaker_device(device.address().toString())
         elif len(self.local_device.connectedDevices()) > 0:
-            print("Force stop")
             self.agent.stop()
-            self.timer.stop()
+            self.scan_loop_timer.stop()
 
-    def clear_device_cache(self):
+    def clear_cached_speaker_device(self):
         if platform.system() == "Linux":
             print("Clearing Bluetooth device cache")
 
@@ -142,21 +129,26 @@ class Bluethooth():
             process.waitForFinished()
             print("Cleared")
 
-    def start_scan(self, *args, **kwargs):
-        bluetooth_cb, = args
-        self.bluetooth_cb = bluetooth_cb
+    def restart_pulseaudio_service(self):
+        print("Restarted PulseAudio service")
+        Popen(['systemctl', '--user', 'restart', 'pulseaudio.service']).communicate()
+
+    def start_scan_loop(self):
+        print("Starting Bluetooth device scan")
+        self.restart_pulseaudio_service()
+        self.clear_cached_speaker_device()
+        self.scan_loop_timer.start(1000)
+        self.agent.start()
+
+    def connect(self, *args):
+        self.bluetooth_speaker_cb = args[0]
 
         try:
-            # time.sleep(1.0)
-            # print("Bluetooth connection successful!")
-            # bluetooth_cb("connected")
-            # raise BluetoothError("Fake Error")
-
             if self.local_device.isValid():
                 print("Bluetooth adapter found")
                 print(f"{self.local_device.address().toString()} \t {self.local_device.name()}")
                 connected_devices = self.local_device.connectedDevices()
-                print(f"Connected devices: {connected_devices}")
+                print(f"Connected Bluetooth devices: {connected_devices}")
 
                 if len(connected_devices) > 0:
                     print("Some device is connected")
@@ -164,57 +156,46 @@ class Bluethooth():
                         print(device.toString())
                         if device.toString() == "B1:20:B5:86:AA:B9":
                             print("Bluetooth is already connected to X6A speaker")
-                            self.bluetooth_cb("connected")
+                            self.bluetooth_speaker_cb("connected")
                 else:
-                    self.clear_device_cache()
-
-                    print("Start Bluetooth device scan")
-                    self.timer.start(1000)
-                    self.agent.start()
+                    self.start_scan_loop()
         except Exception as err:
             print(f"ERROR: {err}")
-            self.bluetooth_cb(BluetoothError("Bluetooth daemon failed to start"))
-
-    def stop_scan(self, *args, **kwargs):
-        self.agent.stop()
-        self.timer.stop()
+            self.bluetooth_speaker_cb(BluetoothSpeakerError("Bluetooth speaker daemon failed to start"))
 
 class QtThread(QThread):
-    start_bluetooth_scan = pyqtSignal(object)
-    stop_scan = pyqtSignal(str)
-
-    is_bluetooth_ready = False
+    connect_bluetooth_speaker = pyqtSignal(object)
+    is_bluetooth_speaker_connected = False
 
     def __init__(self, app):
         QThread.__init__(self)
         self.app = app
 
     def run(self):
-        self.start_bluetooth_scan.emit(self.bluetooth_cb)
+        self.connect_bluetooth_speaker.emit(self.bluetooth_speaker_cb)
 
-        while not self.is_bluetooth_ready:
+        while not self.is_bluetooth_speaker_connected:
             continue
 
         self.start_next_daemon()
 
-    def bluetooth_cb(self, *args, **kwargs):
-        result, = args
-
+    def bluetooth_speaker_cb(self, *args, **kwargs):
+        response, = args
         try:
-            if isinstance(result, BluetoothError):
-                raise BluetoothError(result)
-            elif result == "connected":
-                self.is_bluetooth_ready = True
-        except BluetoothError as err:
-            print(f"BLUETOOTH ERROR: {type(err).__name__} - {err}")
-            # self.kill_app()
+            if isinstance(response, BluetoothSpeakerError):
+                raise BluetoothSpeakerError(response)
+            elif response == "connected":
+                print("CALLBACK: Setting is_bluetooth_speaker_connected flag to True")
+                self.is_bluetooth_speaker_connected = True
+            elif response == "disconnected":
+                print("CALLBACK: Setting is_bluetooth_speaker_connected flag to False")
+                self.is_bluetooth_speaker_connected = False
+        except BluetoothSpeakerError as err:
+            print(f"BLUETOOTH SPEAKER ERROR: {type(err).__name__} - {err}")
+            self.is_bluetooth_speaker_connected = False
         except Exception as err:
             print(f"ERROR: {type(err).__name__} - {err}")
-            # self.kill_app()
-
-    def kill_app(self):
-        print("An exception occured. Exiting app!")
-        self.app.quit()
+            self.is_bluetooth_speaker_connected = False
 
     def start_next_daemon(self):
         print("Starting next daemon")
@@ -222,11 +203,10 @@ class QtThread(QThread):
 def start_window_manager():
     app = QCoreApplication(sys.argv)
 
-    bluetooth = Bluethooth()
+    bluetooth_speaker = BluethoothSpeaker()
 
     qt_thread = QtThread(app)
-    qt_thread.start_bluetooth_scan.connect(bluetooth.start_scan)
-    qt_thread.stop_scan.connect(bluetooth.stop_scan)
+    qt_thread.connect_bluetooth_speaker.connect(bluetooth_speaker.connect)
     qt_thread.start()
 
     sys.exit(app.exec_())
@@ -237,4 +217,4 @@ if __name__ == '__main__':
         signal.signal(signal.SIGINT, signal.SIG_DFL)
         start_window_manager()
     except KeyboardInterrupt:
-        print("W: interrupt received, stopping…")
+        print("Keyboard interrupt received, stopping…")
