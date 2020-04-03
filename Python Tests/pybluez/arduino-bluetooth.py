@@ -10,15 +10,15 @@ sock.connect((host, port))
 
 print("Connected!")
 
-data = input()
-sock.send(data)
+byteList = []
+for i in range(1, 10):
+    byteList.append(255)
+print(byteList)
 
-""" while True:
-    data = input()
-    if not data:
-        break
-    sock.send(data) """
+print("Sending data to Arduino.")
+sock.send(bytes(byteList))
 
+print("Receiving data from Arduino.")
 data = ""
 while True:
     byteData = sock.recv(100)
